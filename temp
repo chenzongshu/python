@@ -1,273 +1,380 @@
 ```
-
-# python热更新
+# Python测试与Mock
 
 标签（空格分隔）： python
 
 ---
 
-**前面的话: 热更新能解决一些python代码更新的问题, 但是绝对不是解决一切发版问题的灵丹妙药**
+自动化测试在软件开发的过程中是非常重要的, 在开发,重构中可以迅速发现bug, 降低后期运维成本
 
-# 热更新
+测试框架有pytest和原生的unittest, pytest使用较方便, 下面介绍
 
-假设你有一个网站有不少的用户量，并时不时需要更新新功能。你不希望在更新新代码的时候把整个网站停掉重启进程，因为这期间可能会流失一部分用户，于是你就在想能不能只需要把旧代码替换成新代码无需重启进程就实现更新呢？ 这就是热更新
+# pytest
 
-简单来说，热更新就是在进程不重启的情况下，让其加载修改后的程序代码，且能按照预期正确执行
+## 安装
 
-# python热更新
-
-python是一种脚本语言, 动态解析, 所以用来写服务端一个很大的优势是可以热更新, 即在服务不停的情况下, 使修改后的代码生效, 在生产环境可以以最小的代价发布版本.
-
-有两种方法, 一种是用守护进程的方法, 另外一种是使用python自带的reload函数.
-
-# 热更新存在的问题
-
-- 函数热更新不支持decorator
-- 进程的内存会增长
-- 类的实列更新
-
-# reload函数
-
-python2中的reload函数可以直接使用，无需导入第三方模块，可以直接使用：
+直接pip安装
 
 ```
-reload(module)  # reload接收的参数必须是已经导入的模块
+pip install pytest
 ```
 
-python3中的reload函数移到了imp库里面，因此需要导入：
+## 使用
+
+pytest会自动从**`当前目录`**寻找测试文件来执行测试用例, 即在测试文件所在目录直接执行
 
 ```
-from imp import reload
-reload(module)
+pytest
 ```
 
-## reload使用注意事项
+测试文件有如下约束:
 
-先说结论, 
+- 所有的单测文件名都需要满足`test_*.py`格式或`*_test.py`格式。
+- 在单测文件中，可以包含`test_`开头的函数，也可以包含`Test`开头的类, 类不能带有 init 方法。
+- 在单测类中，可以包含一个或多个`test_`开头的函数。
+- 断言基本使用`assert`
 
-- **不是打 patch(可以有旧对象删除、有新对象增加、有旧对象修改)；而是把 reload 时生成的新对象替换掉同名旧对象；无法删除旧对象**
-- **class 类继承之后不能更新, 必须重新import一次**
-- **reload不支持`from plugins improt plugin`的方式重载模块，因此可以使用`import plugins.plugin`的方式导入模块并重载**
-
-
-
-# 原理
-
-我们新建一个test_refresh.py文件
+具体参数可以使用命令
 
 ```
-from __future__ import print_function
-
-class RefreshClass(object):
-    def __init__(self):
-        self.value = 1
-
-    def print_info(self):
-        print('RefreshClass value: {} ver1.0'.format(self.value))
-
-version = 3.0
-
-def fprint():
-  print('test')
+pytest -h
 ```
 
-## 命令空间(namespace)
-
-namesapce就是name到对象的映射, 有四类
-
-- `local`: 包含局部变量, 比如一个函数/方法内部
-- `Enclosing`: 闭包函数的命名空间
-- `Global`: 模块的namespace, 每个模块有一个自己的namespace, 记录模块内的class, function等
-- `Built-in`: 包含了内建的变量/关键字
-
-那namespace是派什么用的呢？在python中，如果要访问某一个对象（包括变量，模块，方法等）都是会去namespace中根据对象名称去检索，这里涉及到一个检索顺序，称之为：LEGB ，就是：
-
-`locals` -->> `enclosing` -->> `globals` -->> `__builtins__`
-
-## import
-
-### import介绍
-
-第一次import的时候, 执行了三个步骤:
-
-- 1、找到模块文件, 注意不需要文件的路径后缀
-> 搜索路径: 程序主目录 -> PYTHONPATH目录 -> 标准链接库目录
-
-- 2、编译成字节码
-> 根据时间戳决定是否生成新的pyc文件
-
-- 3、执行模块的代码来创建其所定义的对象
-> 程序会讲导入的文件从头到尾执行一遍，在此过程中任何对变量名进行的赋值操作，都会产生得到的模块文件的属性，但是要注意这些对变量名的赋值操作必须是在模块文件的顶层进行的操作，例如使用def语句来定义函数，模块文件中便会添加这个定义的函数属性
-
-**注意: from语句是将变量名复制到另一个作用域，我们可以在脚本重直接使用复制后的变量名**
-
-当我们import一个module的时候，实际上python是把该import信息写到了`sys.modules`这个dict中，我们可以看看这个dict
+一般可以使用详细测试模式查看所有打印输出
 
 ```
->>> print sys.modules
-{
-    'copy_reg': <module 'copy_reg' from '/usr/lib64/python2.7/copy_reg.pyc'>,   
-    'sre_compile': <module 'sre_compile' from '/usr/lib64/python2.7/sre_compile.pyc'>,  
-    '_sre': <module '_sre' (built-in)>, 
-    'encodings': <module 'encodings' from '/usr/lib64/python2.7/encodings/__init__.pyc'>,   
-    'site': <module 'site' from '/usr/lib64/python2.7/site.pyc'>, 
-    '__builtin__': <module '__builtin__' (built-in)>,   
-    'sysconfig': <module 'sysconfig' from '/usr/lib64/python2.7/sysconfig.pyc'>,    
-    '__main__': <module '__main__' (built-in)>, 
-    'encodings.encodings': None,    
-    'abc': <module 'abc' from '/usr/lib64/python2.7/abc.pyc'>,  
-    'posixpath': <module 'posixpath' from '/usr/lib64/python2.7/posixpath.pyc'>,    
-    '_weakrefset': <module '_weakrefset' from '/usr/lib64/python2.7/_weakrefset.pyc'>,  
-    'errno': <module 'errno' (built-in)>,   
-    'encodings.codecs': None,   
-    'sre_constants': <module 'sre_constants' from '/usr/lib64/python2.7/sre_constants.pyc'>,
-    're': <module 're' from '/usr/lib64/python2.7/re.pyc'>, 
-    '_abcoll': <module '_abcoll' from '/usr/lib64/python2.7/_abcoll.pyc'>,  
-    'types': <module 'types' from '/usr/lib64/python2.7/types.pyc'>,    
-    '_codecs': <module '_codecs' (built-in)>,   
-    'encodings.__builtin__': None,  
-    '_warnings': <module '_warnings' (built-in)>,   
-    'genericpath': <module 'genericpath' from '/usr/lib64/python2.7/genericpath.pyc'>,  
-    'stat': <module 'stat' from '/usr/lib64/python2.7/stat.pyc'>, 
-    'zipimport': <module 'zipimport' (built-in)>,   
-    '_sysconfigdata': <module '_sysconfigdata' from '/usr/lib64/python2.7/_sysconfigdata.pyc'>, 
-    'warnings': <module 'warnings' from '/usr/lib64/python2.7/warnings.pyc'>,   
-    'UserDict': <module 'UserDict' from '/usr/lib64/python2.7/UserDict.pyc'>,   
-    'sys': <module 'sys' (built-in)>,   
-    'codecs': <module 'codecs' from '/usr/lib64/python2.7/codecs.pyc'>, 
-    'readline': <module 'readline' from '/usr/lib64/python2.7/lib-dynload/readline.so'>,    
-    'os.path': <module 'posixpath' from '/usr/lib64/python2.7/posixpath.pyc'>,  
-    'signal': <module 'signal' (built-in)>, 
-    'traceback': <module 'traceback' from '/usr/lib64/python2.7/traceback.pyc'>,    
-    'linecache': <module 'linecache' from '/usr/lib64/python2.7/linecache.pyc'>,    
-    'posix': <module 'posix' (built-in)>,   
-    'exceptions': <module 'exceptions' (built-in)>, 
-    'sre_parse': <module 'sre_parse' from '/usr/lib64/python2.7/sre_parse.pyc'>,    
-    'os': <module 'os' from '/usr/lib64/python2.7/os.pyc'>, 
-    '_weakref': <module '_weakref' (built-in)>
-}
->>> 
->>> type(sys.modules)
-<type 'dict'>
+pytest -v -s test_module.py
 ```
 
-单独打印上面的module，可以看到
+## pytest高级特性fixture
+
+什么是fixture, 简单的说, 就是执行某段代码之前的初始化, 类似于构造函数和析构函数的结合体
+
+可以把fixture看做是资源，在你的测试用例执行之前需要去配置这些资源，执行完后需要去释放资源
+
+把一个函数定义为Fixture很简单，只能在函数声明之前加上“@pytest.fixture”。其他函数要来调用这个Fixture，只用把它当做一个输入的参数即可
 
 ```
->>> print sys.modules['test_refresh']
-<module 'test_refresh' from 'test_refresh.py'>
+# test_fixture_basic.py
+import pytest
+
+@pytest.fixture()
+def before():
+    print '\nbefore each test'
+
+def test_1(before):
+    print 'test_1()'
+
+def test_2(before):
+    print 'test_2()'
+    assert 0
 ```
 
-即key是`test_refresh`, value是`<module 'test_refresh' from 'test_refresh.py'>`
-
-当我们导入一个新的模块的时候，以下两件事情将会发生：
-
-- 1、会在sys.module中插入一条key-value对，key是module名，value就是所导入的module对象。当下一次import相同模块的时候，会先在sys.module中查找该模块，如果存在则直接导入sys.module中的module对象。
-- 2、将module对象加入到global namespace中，当程序需要调用该模块时，会从global namespace中检索。
-
-
-## reload
-
-reload之后，通过变量的值，可以看到该变量是重新指向了新的地址, 注意reload之后, 如果原来py的文件没改, pyc文件不会更新; 如果py文件被修改, pyc会更新
+会输出
 
 ```
->>> id(test_refresh.version)
-26305408
->>>
->>> reload(test_refresh)
-3.0
-<module 'test_refresh' from 'test_refresh.py'>
->>>
->>> id(test_refresh.version)
-25376416
+......
+test_fixture_basic.py::test_1
+before each test
+test_1()
+PASSED
+test_fixture_basic.py::test_2
+before each test
+test_2()
+FAILED
 ```
 
-同理，修改函数值之后，函数也指向了新的地址
+test_1和test_2运行之前都调用了before，也就是before执行了两次。默认情况下，fixture是每个测试用例如果调用了该fixture就会执行一次的。
 
-```
->>> test_refresh.fprint
-<function fprint at 0x7f66a0300668>
->>>
->>> reload(test_refresh)
-<module 'test_refresh' from 'test_refresh.py'>
->>>
->>> test_refresh.fprint
-<function fprint at 0x7f66a03007d0>
-```
+### autouse
 
-### 类的更新
-
-
-
-```
-class Class11(object):
-    v = 1
-    def __init__(self):
-        self.value = 11
-
-    def print_info(self):
-        print('RefreshClass11 value: {} ver1.1'.format(self.value))
-        print('v is {}'.format(self.v))
-```
-
-```
->>> import test1
->>> c1 = test1.Class11()
->>> c1.print_info()
-RefreshClass11 value: 11 ver1.0
-v is 1
-
-# 更改同时更改Class11()的v, value和打印值, 然后reload
->>> reload(test1)
-<module 'test1' from 'test1.py'>
->>> c1.print_info()
-RefreshClass11 value: 11 ver1.0
-v is 1
->>> c1.__class__=test1.Class11
->>> c1.print_info()
-RefreshClass11 value: 11 ver1.1
-v is 2
-```
-
-**注意__init__()里面的value没有被更新, 即类变量更新了, 成员变量没更新**
-
-**只reload逻辑, 不reload数据**
-
-## 代码实现
-
-可以在原来程序中增加对外调用接口(如PRC或者Restful API)
+还有一个参数是`autouse`, 当设置为True时， 在一个session内的所有的test都会自动调用这个fixture。 权限大，责任也大，所以用该功能时也要谨慎小心
 
 ```
 import time
-import sys, os
+import pytest
 
-def auto_reload():
-    mods = ["my_config"] # the need reload modules
+@pytest.fixture(scope="module", autouse=True)
+def mod_header(request):
+    print('\n-----------------')
+    print('module      : %s' % request.module.__name__)
+    print('-----------------')
 
-    for mod in mods:
-        try:
-            module = sys.modules[mod]
-        except:
-            continue
+@pytest.fixture(scope="function", autouse=True)
+def func_header(request):
+    print('\n-----------------')
+    print('function    : %s' % request.function.__name__)
+    print('time        : %s' % time.asctime())
+    print('-----------------')
 
-        filename = module.__file__
+def test_one():
+    print('in test_one()')
 
-        if filename.endswith(".pyc"):
-            filename = filename.replace(".pyc", ".py")
-        mod_time = os.path.getmtime(filename)
-        if not "loadtime" in module.__dict__:
-            module.loadtime = 0 # first load's time  1*
+def test_two():
+    print('in test_two()')
 
-        try:
-            if mod_time > module.loadtime:
-                reload(module)
-        except:
-            pass
-
-        module.loadtime = mod_time
 ```
 
+输出为:
 
+```
+[root@vm1 pytest]# pytest -v -s test_1.py
+......
+
+test_1.py::test_one
+-----------------
+module      : test_1
+-----------------
+
+-----------------
+function    : test_one
+time        : Tue Mar  5 20:05:27 2019
+-----------------
+in test_one()
+PASSED
+test_1.py::test_two
+-----------------
+function    : test_two
+time        : Tue Mar  5 20:05:27 2019
+-----------------
+in test_two()
+PASSED
+```
+
+# Mock
+
+## Mock是什么
+
+Mock是就是在单元测试中, 模拟对象,函数接口的方法, 特别是系统与外部第三方有大量交互调用时大展身手
+
+## 为什么用Mock
+
+可能有同学说为什么用Mock, 真实第三方环境不是更贴近生产环境, 理想很美好, 现实总是血淋漓, 举几个栗子吧
+
+- 复杂云环境搭建不易, 需要资源太多, 多个团队共用一个开发环境, 几十号人在上面折腾, 环境长期不可用, 你要测试自己的功能, 呵呵, 图杨图森破
+- 某些功能就不方便真实测试, 比如需要邮件告警, 在自动化测试的时候每天几十封邮件发给别人, 可能还伴随电话, 估计你同事唯一想做的事情就是拿你祭天
+
+这个时候, 你就需要Mock来模拟那些你眼中的"垃圾"的交互服务, 有种掌握一切的感觉, 相信我, 这种感觉会上头的......
+
+## Mock安装
+
+在Python 3.3以前的版本中，需要另外安装mock模块，可以使用pip命令来安装：
+
+```
+$ sudo pip install mock
+```
+
+然后在代码中就可以直接import进来：
+```
+import mock
+```
+
+从Python 3.3开始，mock模块已经被合并到标准库中，被命名为unittest.mock，可以直接import进来使用：
+
+```
+from unittest import mock
+```
+
+## Mock使用
+
+有 **`Mock`** 和 **`MagicMock`** 两个常用子类
+
+```
+class Mock(spec=None, side_effect=None, return_value=DEFAULT, wraps=None, name=None, spec_set=None, **kwargs)
+```
+
+- name: 这个是用来命名一个mock对象，只是起到标识作用，当你print一个mock对象的时候，可以看到它的name。
+- return_value: 这个字段可以指定一个值（或者对象），当mock对象被调用时，如果side_effect函数返回的是DEFAULT，则对mock对象的调用会返回return_value指定的值。
+- side_effect: 这个参数指向一个可调用对象，一般就是函数。当mock对象被调用时，如果该函数返回值不是DEFAULT时，那么以该函数的返回值作为mock对象调用的返回值。
+
+来试试mock:
+
+```
+>>> class Foo():
+...     def echo(self, *args):
+...         return "hello"
+...
+>>> foo = Foo()
+>>>
+>>> foo.echo()
+'hello'
+>>>
+>>> foo.echo=mock.Mock()
+>>> foo.echo.return_value="mock value"
+>>> foo.echo()
+'mock value'
+>>> foo.echo(1,2)
+'mock value'
+```
+
+注意,被mock之后, foo.echo类型变成了Mock类
+
+```
+>>> type(foo.echo)
+<class 'mock.mock.Mock'>
+```
+
+有如下方法:
+
+```
+>>> dir(foo.echo)
+['assert_any_call', 'assert_called', 'assert_called_once', 'assert_called_once_with', 'assert_called_with', 'assert_has_calls', 'assert_not_called', 'attach_mock', 'call_args', 'call_args_list', 'call_count', 'called', 'configure_mock', 'method_calls', 'mock_add_spec', 'mock_calls', 'reset_mock', 'return_value', 'side_effect']
+```
+
+可以看到其中一些值
+
+```
+>>> foo.echo.called
+True
+>>> foo.echo.call_count
+3
+```
+
+## side_effect
+
+side_effect 是一个非常有用的参数，大大提高了 mock 返回值的灵活性，它可以是一个异常、函数或者可迭代对象。例如返回一个异常：
+
+```
+>>> except_mock = mock.Mock(side_effect=Exception('Boom!'))
+>>>
+>>> except_mock()
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "/usr/lib/python2.7/site-packages/mock/mock.py", line 1062, in __call__
+    return _mock_self._mock_call(*args, **kwargs)
+  File "/usr/lib/python2.7/site-packages/mock/mock.py", line 1118, in _mock_call
+    raise effect
+Exception: Boom!
+```
+
+当 side_effect 为迭代对象时
+
+```
+>>> iter_mock = mock.Mock(side_effect=[1, 2, 3])
+>>>
+>>> iter_mock()
+1
+>>> iter_mock()
+2
+>>> iter_mock()
+3
+>>> iter_mock()
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "/usr/lib/python2.7/site-packages/mock/mock.py", line 1062, in __call__
+    return _mock_self._mock_call(*args, **kwargs)
+  File "/usr/lib/python2.7/site-packages/mock/mock.py", line 1121, in _mock_call
+    result = next(effect)
+  File "/usr/lib/python2.7/site-packages/mock/mock.py", line 109, in next
+    return _next(obj)
+StopIteration
+```
+
+side_effect 为函数时
+
+```
+>>> def side_effect(value):
+...     return value
+...
+>>>
+>>> side_effect_mock = mock.Mock(side_effect=side_effect)
+>>> side_effect_mock(1)
+1
+>>> side_effect_mock("hello world!")
+'hello world!'
+```
+
+# Mock Server
+
+还有一种办法, 即做一个mocker server, 模拟第三方服务响应, 可以用于第三方环境模拟, 有条件可以使用线上平台比如`easy-mock`, `eolinker mock`等, 没条件的自己用flask简单写一个
+
+> mock函数多用于测试用例, mock server用于第三方服务的模拟
+
+python可以使用flask简单模拟
+
+首先安装flask
+
+```
+pip install flask
+```
+
+## get请求
+
+简单示例
+
+```
+from flask import abort, jsonify, Flask, request, Response
+
+app = Flask(__name__)
+
+tasks = {
+    "data": {
+        "loginName": "admin",
+        "roles": 1,
+        "permissions": 1,
+        "active": 1
+    },
+    "stateCode": {
+        "code": 0,
+        "desc": "成功"
+    },
+    "statusText": "成功",
+    "timestamp": "1500531770453",
+    "success": 1
+}
+
+@app.route("/task", methods=['GET'])
+def get_all_task():
+    return jsonify(tasks)
+    
+if __name__ == "__main__":
+    if __name__ == "__main__":
+    app.run(
+        host = "127.0.0.1",
+        port = 8989,
+        debug = True
+        )
+```
+
+启动服务
+
+```
+python test.py
+```
+
+测试
+
+```
+curl -i "http://127.0.0.1:8989/task"
+```
+
+## post
+
+详细可以看flask示例, 简单示例可对上面进行简单改造如下:
+
+```
+......
+@app.route('/v1/testMock', methods=['GET', 'POST'])
+def app_call_back():
+    if request.method == 'GET':
+        return jsonify(tasks)
+    else:
+        test_data = request.form['params']
+        return jsonify(test_data)
+......
+```
+
+测试
+
+```
+curl -d "params=test_mock" "http://127.0.0.1:8989/v1/testMock
+```
+
+默认Flask调用jsonify返回结果是utf8，如果需要返回支持中文显示，只需要在app = Flask(name)下增加一行：
+
+```
+app.config['JSON_AS_ASCII'] = False
+```
 
 
 ```
