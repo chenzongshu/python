@@ -1,380 +1,141 @@
 ```
-# Python测试与Mock
 
-标签（空格分隔）： python
+现在提供Restful HTTP API接口的模块和服务越来越多, 良好的Restful API接口易于理解, 便于扩展, 下面总结一下Restful API接口规范
 
----
+# 使用 HTTPS
 
-自动化测试在软件开发的过程中是非常重要的, 在开发,重构中可以迅速发现bug, 降低后期运维成本
+这个和 Restful API 本身没有很大的关系，但是对于增加网站的安全是非常重要的。特别如果你提供的是公开 API，用户的信息泄露或者被攻击会严重影响网站的信誉。
 
-测试框架有pytest和原生的unittest, pytest使用较方便, 下面介绍
+# API 地址和版本
 
-# pytest
+在 url 中指定 API 的版本是个很好地做法。如果 API 变化比较大，可以把 API 设计为子域名，比如 `https://api.github.com/v3` ；也可以简单地把版本放在路径中，比如 `https://example.com/api/v1`。
 
-## 安装
+# schema
 
-直接pip安装
+对于响应返回的格式，JSON 因为它的可读性、紧凑性以及多种语言支持等优点，成为了 HTTP API 最常用的返回格式。因此，最好采用 JSON 作为返回内容的格式。如果用户需要其他格式，比如 xml，应该在请求头部 `Accept` 中指定。对于不支持的格式，服务端需要返回正确的 `status code`，并给出详细的说明
 
-```
-pip install pytest
-```
+# 以资源为中心的 URL 设计
 
-## 使用
-
-pytest会自动从**`当前目录`**寻找测试文件来执行测试用例, 即在测试文件所在目录直接执行
+资源是 `Restful API` 的核心元素，所有的操作都是针对特定资源进行的。而资源就是 `URL`（Uniform Resoure Locator）表示的，所以简洁、清晰、结构化的 URL 设计是至关重要的。Github 可以说是这方面的典范，下面我们就拿`repository` 来说明。
 
 ```
-pytest
+/users/:username/repos
+/users/:org/repos
+/repos/:owner/:repo
+/repos/:owner/:repo/tags
+/repos/:owner/:repo/branches/:branch
 ```
 
-测试文件有如下约束:
+我们可以看到几个特性：
 
-- 所有的单测文件名都需要满足`test_*.py`格式或`*_test.py`格式。
-- 在单测文件中，可以包含`test_`开头的函数，也可以包含`Test`开头的类, 类不能带有 init 方法。
-- 在单测类中，可以包含一个或多个`test_`开头的函数。
-- 断言基本使用`assert`
+- 资源分为单个文档和集合，尽量使用复数来表示资源，单个资源通过添加 id 或者 name 等来表示
+- 一个资源可以有多个不同的 URL
+- 资源可以嵌套，通过类似目录路径的方式来表示，以体现它们之间的关系
 
-具体参数可以使用命令
+NOTE: 根据RFC3986定义，URL是大小写敏感的。所以为了避免歧义，尽量使用小写字母。
 
-```
-pytest -h
-```
 
-一般可以使用详细测试模式查看所有打印输出
+# 使用正确的 Method
 
-```
-pytest -v -s test_module.py
-```
+有了资源的 URL 设计，所有针对资源的操作都是使用 HTTP 方法指定的。比较常用的方法有：
 
-## pytest高级特性fixture
+| VERB   | 描述                                                                                                   |
+| ------ | ------------------------------------------------------------------------------------------------------ |
+| HEAD   | 只获取某个资源的头部信息。比如只想了解某个文件的大小，某个资源的修改日期等                             |
+| GET    | 获取资源                                                                                               |
+| POST   | 创建资源                                                                                               |
+| PATCH  | 更新资源的部分属性。因为 PATCH 比较新，而且规范比较复杂，所以真正实现的比较少，一般都是用 POST 替代    |
+| PUT    | 替换资源，客户端需要提供新建资源的所有属性。如果新内容为空，要设置 Content-Length 为 0，以区别错误信息 |
+| DELETE | 删除资源                                                                                               |
 
-什么是fixture, 简单的说, 就是执行某段代码之前的初始化, 类似于构造函数和析构函数的结合体
 
-可以把fixture看做是资源，在你的测试用例执行之前需要去配置这些资源，执行完后需要去释放资源
-
-把一个函数定义为Fixture很简单，只能在函数声明之前加上“@pytest.fixture”。其他函数要来调用这个Fixture，只用把它当做一个输入的参数即可
+比如：
 
 ```
-# test_fixture_basic.py
-import pytest
-
-@pytest.fixture()
-def before():
-    print '\nbefore each test'
-
-def test_1(before):
-    print 'test_1()'
-
-def test_2(before):
-    print 'test_2()'
-    assert 0
+GET /repos/:owner/:repo/issues
+GET /repos/:owner/:repo/issues/:number
+POST /repos/:owner/:repo/issues
+PATCH /repos/:owner/:repo/issues/:number
+DELETE /repos/:owner/:repo
 ```
 
-会输出
+## 不符合 CRUD 的情况
 
-```
-......
-test_fixture_basic.py::test_1
-before each test
-test_1()
-PASSED
-test_fixture_basic.py::test_2
-before each test
-test_2()
-FAILED
-```
+在实际资源操作中，总会有一些不符合 `CRUD`（Create-Read-Update-Delete） 的情况，一般有几种处理方法。
 
-test_1和test_2运行之前都调用了before，也就是before执行了两次。默认情况下，fixture是每个测试用例如果调用了该fixture就会执行一次的。
+- 使用 POST
 
-### autouse
+为需要的动作增加一个 `endpoint`，使用 `POST` 来执行动作，比如 `POST /resend` 重新发送邮件。
 
-还有一个参数是`autouse`, 当设置为True时， 在一个session内的所有的test都会自动调用这个fixture。 权限大，责任也大，所以用该功能时也要谨慎小心
+- 增加控制参数
 
-```
-import time
-import pytest
+添加动作相关的参数，通过修改参数来控制动作。比如一个博客网站，会有把写好的文章“发布”的功能，可以用上面的 `POST /articles/{:id}/publish` 方法，也可以在文章中增加 `published:boolean` 字段，发布的时候就是更新该字段 `PUT /articles/{:id}?published=true`
 
-@pytest.fixture(scope="module", autouse=True)
-def mod_header(request):
-    print('\n-----------------')
-    print('module      : %s' % request.module.__name__)
-    print('-----------------')
+- 把动作转换成资源
 
-@pytest.fixture(scope="function", autouse=True)
-def func_header(request):
-    print('\n-----------------')
-    print('function    : %s' % request.function.__name__)
-    print('time        : %s' % time.asctime())
-    print('-----------------')
-
-def test_one():
-    print('in test_one()')
+把动作转换成可以执行 `CRUD` 操作的资源， github 就是用了这种方法。
 
-def test_two():
-    print('in test_two()')
-
-```
+比如“喜欢”一个 gist，就增加一个 /gists/:id/star 子资源，然后对其进行操作：“喜欢”使用 `PUT /gists/:id/star`，“取消喜欢”使用 `DELETE /gists/:id/star`。
 
-输出为:
+另外一个例子是 Fork，这也是一个动作，但是在 gist 下面增加 forks资源，就能把动作变成 CRUD 兼容的：`POST /gists/:id/forks` 可以执行用户 fork 的动作。
 
-```
-[root@vm1 pytest]# pytest -v -s test_1.py
-......
-
-test_1.py::test_one
------------------
-module      : test_1
------------------
+# 选择合适的状态码
+HTTP 应答中，需要带一个很重要的字段：status code。它说明了请求的大致情况，是否正常完成、需要进一步处理、出现了什么错误，对于客户端非常重要。状态码都是三位的整数，大概分成了几个区间：
 
------------------
-function    : test_one
-time        : Tue Mar  5 20:05:27 2019
------------------
-in test_one()
-PASSED
-test_1.py::test_two
------------------
-function    : test_two
-time        : Tue Mar  5 20:05:27 2019
------------------
-in test_two()
-PASSED
-```
-
-# Mock
-
-## Mock是什么
-
-Mock是就是在单元测试中, 模拟对象,函数接口的方法, 特别是系统与外部第三方有大量交互调用时大展身手
-
-## 为什么用Mock
-
-可能有同学说为什么用Mock, 真实第三方环境不是更贴近生产环境, 理想很美好, 现实总是血淋漓, 举几个栗子吧
-
-- 复杂云环境搭建不易, 需要资源太多, 多个团队共用一个开发环境, 几十号人在上面折腾, 环境长期不可用, 你要测试自己的功能, 呵呵, 图杨图森破
-- 某些功能就不方便真实测试, 比如需要邮件告警, 在自动化测试的时候每天几十封邮件发给别人, 可能还伴随电话, 估计你同事唯一想做的事情就是拿你祭天
-
-这个时候, 你就需要Mock来模拟那些你眼中的"垃圾"的交互服务, 有种掌握一切的感觉, 相信我, 这种感觉会上头的......
-
-## Mock安装
-
-在Python 3.3以前的版本中，需要另外安装mock模块，可以使用pip命令来安装：
-
-```
-$ sudo pip install mock
-```
-
-然后在代码中就可以直接import进来：
-```
-import mock
-```
-
-从Python 3.3开始，mock模块已经被合并到标准库中，被命名为unittest.mock，可以直接import进来使用：
-
-```
-from unittest import mock
-```
-
-## Mock使用
-
-有 **`Mock`** 和 **`MagicMock`** 两个常用子类
-
-```
-class Mock(spec=None, side_effect=None, return_value=DEFAULT, wraps=None, name=None, spec_set=None, **kwargs)
-```
-
-- name: 这个是用来命名一个mock对象，只是起到标识作用，当你print一个mock对象的时候，可以看到它的name。
-- return_value: 这个字段可以指定一个值（或者对象），当mock对象被调用时，如果side_effect函数返回的是DEFAULT，则对mock对象的调用会返回return_value指定的值。
-- side_effect: 这个参数指向一个可调用对象，一般就是函数。当mock对象被调用时，如果该函数返回值不是DEFAULT时，那么以该函数的返回值作为mock对象调用的返回值。
-
-来试试mock:
-
-```
->>> class Foo():
-...     def echo(self, *args):
-...         return "hello"
-...
->>> foo = Foo()
->>>
->>> foo.echo()
-'hello'
->>>
->>> foo.echo=mock.Mock()
->>> foo.echo.return_value="mock value"
->>> foo.echo()
-'mock value'
->>> foo.echo(1,2)
-'mock value'
-```
-
-注意,被mock之后, foo.echo类型变成了Mock类
-
-```
->>> type(foo.echo)
-<class 'mock.mock.Mock'>
-```
-
-有如下方法:
-
-```
->>> dir(foo.echo)
-['assert_any_call', 'assert_called', 'assert_called_once', 'assert_called_once_with', 'assert_called_with', 'assert_has_calls', 'assert_not_called', 'attach_mock', 'call_args', 'call_args_list', 'call_count', 'called', 'configure_mock', 'method_calls', 'mock_add_spec', 'mock_calls', 'reset_mock', 'return_value', 'side_effect']
-```
-
-可以看到其中一些值
-
-```
->>> foo.echo.called
-True
->>> foo.echo.call_count
-3
-```
-
-## side_effect
-
-side_effect 是一个非常有用的参数，大大提高了 mock 返回值的灵活性，它可以是一个异常、函数或者可迭代对象。例如返回一个异常：
-
-```
->>> except_mock = mock.Mock(side_effect=Exception('Boom!'))
->>>
->>> except_mock()
-Traceback (most recent call last):
-  File "<stdin>", line 1, in <module>
-  File "/usr/lib/python2.7/site-packages/mock/mock.py", line 1062, in __call__
-    return _mock_self._mock_call(*args, **kwargs)
-  File "/usr/lib/python2.7/site-packages/mock/mock.py", line 1118, in _mock_call
-    raise effect
-Exception: Boom!
-```
-
-当 side_effect 为迭代对象时
-
-```
->>> iter_mock = mock.Mock(side_effect=[1, 2, 3])
->>>
->>> iter_mock()
-1
->>> iter_mock()
-2
->>> iter_mock()
-3
->>> iter_mock()
-Traceback (most recent call last):
-  File "<stdin>", line 1, in <module>
-  File "/usr/lib/python2.7/site-packages/mock/mock.py", line 1062, in __call__
-    return _mock_self._mock_call(*args, **kwargs)
-  File "/usr/lib/python2.7/site-packages/mock/mock.py", line 1121, in _mock_call
-    result = next(effect)
-  File "/usr/lib/python2.7/site-packages/mock/mock.py", line 109, in next
-    return _next(obj)
-StopIteration
-```
-
-side_effect 为函数时
-
-```
->>> def side_effect(value):
-...     return value
-...
->>>
->>> side_effect_mock = mock.Mock(side_effect=side_effect)
->>> side_effect_mock(1)
-1
->>> side_effect_mock("hello world!")
-'hello world!'
-```
-
-# Mock Server
-
-还有一种办法, 即做一个mocker server, 模拟第三方服务响应, 可以用于第三方环境模拟, 有条件可以使用线上平台比如`easy-mock`, `eolinker mock`等, 没条件的自己用flask简单写一个
-
-> mock函数多用于测试用例, mock server用于第三方服务的模拟
-
-python可以使用flask简单模拟
-
-首先安装flask
-
-```
-pip install flask
-```
-
-## get请求
-
-简单示例
-
-```
-from flask import abort, jsonify, Flask, request, Response
-
-app = Flask(__name__)
-
-tasks = {
-    "data": {
-        "loginName": "admin",
-        "roles": 1,
-        "permissions": 1,
-        "active": 1
-    },
-    "stateCode": {
-        "code": 0,
-        "desc": "成功"
-    },
-    "statusText": "成功",
-    "timestamp": "1500531770453",
-    "success": 1
-}
-
-@app.route("/task", methods=['GET'])
-def get_all_task():
-    return jsonify(tasks)
-    
-if __name__ == "__main__":
-    if __name__ == "__main__":
-    app.run(
-        host = "127.0.0.1",
-        port = 8989,
-        debug = True
-        )
-```
-
-启动服务
-
-```
-python test.py
-```
-
-测试
-
-```
-curl -i "http://127.0.0.1:8989/task"
-```
-
-## post
-
-详细可以看flask示例, 简单示例可对上面进行简单改造如下:
-
-```
-......
-@app.route('/v1/testMock', methods=['GET', 'POST'])
-def app_call_back():
-    if request.method == 'GET':
-        return jsonify(tasks)
-    else:
-        test_data = request.form['params']
-        return jsonify(test_data)
-......
-```
-
-测试
-
-```
-curl -d "params=test_mock" "http://127.0.0.1:8989/v1/testMock
-```
-
-默认Flask调用jsonify返回结果是utf8，如果需要返回支持中文显示，只需要在app = Flask(name)下增加一行：
-
-```
-app.config['JSON_AS_ASCII'] = False
-```
+- 2XX：请求正常处理并返回
+- 3XX：重定向，请求的资源位置发生变化
+- 4XX：客户端发送的请求有错误
+- 5XX：服务器端错误
+
+在 HTTP API 设计中，经常用到的状态码以及它们的意义如下表：
+
+| 状态码 | LABEL                  | 解释                                                                                                                                                                                  |
+| ------ | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 200    | OK                     | 请求成功接收并处理，一般响应中都会有 body                                                                                                                                             |
+| 201    | Created                | 请求已完成，并导致了一个或者多个资源被创建，最常用在 POST 创建资源的时候                                                                                                              |
+| 202    | Accepted               | 请求已经接收并开始处理，但是处理还没有完成。一般用在异步处理的情况，响应 body 中应该告诉客户端去哪里查看任务的状态                                                                    |
+| 204    | No Content             | 请求已经处理完成，但是没有信息要返回，经常用在 PUT 更新资源的时候（客户端提供资源的所有属性，因此不需要服务端返回）。如果有重要的 metadata，可以放到头部返回                          |
+| 301    | Moved Permanently      | 请求的资源已经永久性地移动到另外一个地方，后续所有的请求都应该直接访问新地址。服务端会把新地址写在 Location 头部字段，方便客户端使用。允许客户端把 POST 请求修改为 GET。              |
+| 304    | Not Modified           | 请求的资源和之前的版本一样，没有发生改变。用来缓存资源，和条件性请求（conditional request）一起出现                                                                                   |
+| 307    | Temporary Redirect     | 目标资源暂时性地移动到新的地址，客户端需要去新地址进行操作，但是不能修改请求的方法。                                                                                                  |
+| 308    | Permanent Redirect     | 和 301 类似，除了客户端不能修改原请求的方法                                                                                                                                           |
+| 400    | Bad Request            | 客户端发送的请求有错误（请求语法错误，body 数据格式有误，body 缺少必须的字段等），导致服务端无法处理                                                                                  |
+| 401    | Unauthorized           | 请求的资源需要认证，客户端没有提供认证信息或者认证信息不正确                                                                                                                          |
+| 403    | Forbidden              | 服务器端接收到并理解客户端的请求，但是客户端的权限不足。比如，普通用户想操作只有管理员才有权限的资源。                                                                                |
+| 404    | Not Found              | 客户端要访问的资源不存在，链接失效或者客户端伪造 URL 的时候回遇到这个情况                                                                                                             |
+| 405    | Method Not Allowed     | 服务端接收到了请求，而且要访问的资源也存在，但是不支持对应的方法。服务端必须返回 Allow 头部，告诉客户端哪些方法是允许的                                                               |
+| 415    | Unsupported Media Type | 服务端不支持客户端请求的资源格式，一般是因为客户端在 Content-Type 或者 Content-Encoding 中申明了希望的返回格式，但是服务端没有实现。比如，客户端希望收到 xml返回，但是服务端支持 Json |
+| 429    | Too Many Requests      | 客户端在规定的时间里发送了太多请求，在进行限流的时候会用到                                                                                                                            |
+| 500    | Internal Server Error  | 服务器内部错误，导致无法完成请求的内容                                                                                                                                                |
+| 503    | Service Unavailable    | 服务器因为负载过高或者维护，暂时无法提供服务。服务器端应该返回 Retry-After                                                                                                            |
+
+# 错误处理：给出详细信息
+
+如果出错的话，在 response body 中通过 message 给出明确的信息。
+
+比如客户端发送的请求有错误，一般会返回 4XX Bad Request 结果。这个结果很模糊，给出错误 message 的话，能更好地让客户端知道具体哪里有问题，进行快速修改。
+
+
+# 限流 rate limit
+
+如果对访问的次数不加控制，很可能会造成 API 被滥用，甚至被 DDos 攻击。根据使用者不同的身份对其进行限流，可以防止这些情况，减少服务器的压力。
+
+对用户的请求限流之后，要有方法告诉用户它的请求使用情况，Github API 使用的三个相关的头部：
+
+- X-RateLimit-Limit: 用户每个小时允许发送请求的最大值
+- X-RateLimit-Remaining：当前时间窗口剩下的可用请求数目
+- X-RateLimit-Rest: 时间窗口重置的时候，到这个时间点可用的请求数量就会变成 X-RateLimit-Limit 的值
+
+如果允许没有登录的用户使用 API（可以让用户试用），可以把 X-RateLimit-Limit 的值设置得很小，比如 Github 使用的 60。没有登录的用户是按照请求的 IP 来确定的，而登录的用户按照认证后的信息来确定身份。
+
+对于超过流量的请求，可以返回 429 Too many requests 状态码，并附带错误信息。而 Github API 返回的是 403 Forbidden，虽然没有 429 更准确，也是可以理解的。
+
+# 编写优秀的文档
+
+API 最终是给人使用的，不管是公司内部，还是公开的 API 都是一样。即使我们遵循了上面提到的所有规范，设计的 API 非常优雅，用户还是不知道怎么使用我们的 API。最后一步，但非常重要的一步是：为你的 API 编写优秀的文档。
+
+对每个请求以及返回的参数给出说明，最好给出一个详细而完整地示例，提醒用户需要注意的地方……反正目标就是用户可以根据你的文档就能直接使用 API，而不是要发邮件给你，或者跑到你的座位上问你一堆问题。
+
 
 
 ```
